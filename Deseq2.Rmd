@@ -1,0 +1,312 @@
+---
+title: "R Notebook"
+artical : "https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html"
+artical1 : "https://bioconductor.github.io/BiocWorkshops/rna-seq-data-analysis-with-deseq2.html"
+artical2:"https://bioconductor.org/packages/release/bioc/vignettes/tximport/inst/doc/tximport.html"
+artical3:"https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html"
+youbube:"https://youtu.be/hJB7cHfmppc?si=ebZmvdXz_gFm_b5b"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+# Load required libraries
+library("org.Hs.eg.db")
+library(sf)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(DESeq2)
+library(tibble)
+library(EnhancedVolcano)
+library(readr)
+```
+
+
+```{r}
+# List of SF file paths
+sf_files <- list.files(path = 'D:/Data project/DATA science/Github/PRJNA944361 Transcriptional response to standard AML drugs identifies synergistic combinations (human)/GSE227269_RAW/sf', pattern = "\\.sf$", full.names = TRUE) # Add all file paths here
+
+```
+
+
+```{r}
+library(tximport)
+library(ensembldb)
+library(AnnotationHub)
+hub <- AnnotationHub()
+```
+
+```{r}
+ensdb_query <- query(hub, c("EnsDb", "sapiens", "109"))
+ensdb_query
+ensdb_109 <- ensdb_query[['AH109606']]
+
+# Extract transcript and gene information
+tx_data <- transcripts(ensdb_109, return.type = "DataFrame")
+
+# Create the tx2gene data.frame
+tx2gene <- tx_data[, c("tx_id", "gene_id")]
+
+tx2gene
+```
+
+
+```{r}
+sample_names <- gsub("_.*", "", basename(sf_files))
+names(sf_files) <- sample_names
+
+txi <- tximport(sf_files, type = "salmon", tx2gene = tx2gene,ignoreTxVersion = TRUE)
+
+```
+
+
+```{r}
+colData <- read.csv("D:/Data project/DATA science/Github/PRJNA944361 Transcriptional response to standard AML drugs identifies synergistic combinations (human)/SraRunTable.txt")
+
+
+# Now you can use select
+colData <- dplyr::select(colData, Library.Name, treatment, cell_line) %>%
+  column_to_rownames(var = "Library.Name")
+
+# Subset colData based on the row order
+colData <- colData[colnames(txi$counts), ]
+```
+
+
+
+```{r}
+
+co = txi$counts
+co[,] = as.integer(txi$abundance*10)
+# filters out rows where at least one value is not equal to 0.
+# co <- filter_all(co,any_vars(. != 0))
+
+# Check the levels of the treatment factor
+# levels(colData$treatment)
+# 
+# # If the levels contain characters other than letters, numbers, '_', and '.', you can modify them
+# # For example, you can use make.names() function to replace unsafe characters with safe ones
+# levels(colData$treatment) <- make.names(levels(colData$treatment))
+colData <- colData[colnames(co), ]
+# Now create DESeqDataSet
+dds <- DESeqDataSetFromMatrix(countData = co,
+                              colData = colData,
+                              design = ~ cell_line + treatment)
+
+
+dds
+
+```
+
+```{r}
+dds <- DESeq(dds)
+resultsNames(dds)
+```
+
+
+```{r}
+# Then specify the contrast accordingly, ensuring the names match the levels exactly
+res <- results(dds, name="treatment_Cytarabine.and.Daunorubicin_vs_Cytarabine")
+
+plotMA(res)
+
+res <- results(dds, contrast=c("treatment","DMSO","Cytarabine"))
+
+plotMA(res)
+
+res <- lfcShrink(dds,
+                 coef= "treatment_Cytarabine.and.Daunorubicin_vs_Cytarabine",
+                 type = 'normal')
+plotMA(res, ylim = c(-.5, .5))
+# res <- results(dds, lfcThreshold=.01)
+# plotMA(res)
+# res <- results(dds, alpha = 0.01)
+# plotMA(res)
+# 
+# plotMA(res, MLE=TRUE)
+# 
+# 
+# res.ape <- lfcShrink(dds=dds, coef=2, type="apeglm")
+# plotMA(res.ape)
+# res.ash <- lfcShrink(dds=dds, coef=2, type="ashr")
+# plotMA(res.ash)
+# res.norm <- lfcShrink(dds=dds, coef=2, type="normal")
+# plotMA(res.norm)
+```
+```{r}
+plotCounts(dds, gene=which.min(res$padj), intgroup="treatment")
+
+```
+
+
+```{r}
+colData(dds)
+```
+
+```{r}
+ddsMF <- dds
+levels(ddsMF$cell_line )
+levels(ddsMF$treatment  )
+```
+
+
+```{r}
+design(ddsMF) <- formula(~ cell_line + treatment)
+ddsMF <- DESeq(ddsMF)
+```
+
+
+```{r}
+resMF <- results(ddsMF)
+head(resMF)
+```
+
+```{r}
+resMF <- results(ddsMF)
+head(resMF)
+
+```
+
+```{r}
+resMFType <- results(ddsMF,
+                     contrast=c("treatment", "DMSO", "Cytarabine"))
+head(resMFType)
+```
+
+```{r}
+vsd <- vst(dds, blind=FALSE)
+rld <- rlog(dds, blind=FALSE)
+head(assay(vsd), 3)
+```
+
+
+```{r}
+ntd <- normTransform(dds)
+library("vsn")
+meanSdPlot(assay(ntd))
+```
+
+```{r}
+meanSdPlot(assay(vsd))
+
+```
+
+
+
+```{r}
+meanSdPlot(assay(rld))
+
+```
+
+
+```{r}
+library("pheatmap")
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds)[,c("treatment","cell_line")])
+pheatmap(assay(ntd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=FALSE, annotation_col=df)
+```
+
+
+```{r}
+pheatmap(assay(vsd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=FALSE, annotation_col=df)
+```
+
+```{r}
+pheatmap(assay(rld)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=FALSE, annotation_col=df)
+```
+
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+```
+
+
+```{r}
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(vsd$treatment, vsd$cell_line, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+```{r}
+plotPCA(vsd, intgroup=c("treatment", "cell_line"))
+```
+
+
+```{r}
+pcaData <- plotPCA(vsd, intgroup=c("treatment", "cell_line"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=treatment, shape=cell_line)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+
+
+```{r}
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds)
+```
+
+
+```{r}
+dds <- estimateSizeFactors(dds, controlGenes=ctrlGenes)
+dds <- DESeq(dds)
+```
+
+
+```{r}
+results(dds, contrast=c("treatment","DMSO","Daunorubicin"))
+```
+```{r}
+dds$group <- factor(paste0(dds$cell_lin, dds$treatment))
+design(dds) <- ~ group
+dds <- DESeq(dds)
+resultsNames(dds)
+results(dds, contrast=c("group", "DMSO", "Cytarabine"))
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
